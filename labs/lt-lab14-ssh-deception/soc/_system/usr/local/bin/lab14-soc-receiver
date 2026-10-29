@@ -1,0 +1,46 @@
+#!/usr/bin/python3
+import json
+import socketserver
+from logging import Formatter, getLogger, INFO
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+LOG = Path("/var/log/lab14-soc/events.jsonl")
+LOG.parent.mkdir(parents=True, exist_ok=True)
+
+logger = getLogger("lab14")
+logger.setLevel(INFO)
+handler = RotatingFileHandler(
+    str(LOG), maxBytes=5 * 1024 * 1024, backupCount=2
+)
+handler.setFormatter(Formatter("%(message)s"))
+logger.addHandler(handler)
+
+EVENTS = {
+    "lab14.session.connect",
+    "lab14.command.input",
+    "lab14.session.close"
+}
+
+class Receiver(socketserver.StreamRequestHandler):
+    def handle(self):
+        if self.client_address[0] != "10.60.214.40":
+            return
+        raw = self.rfile.readline(4096)
+        try:
+            event = json.loads(raw)
+            if not isinstance(event, dict):
+                return
+            if event.get("eventid") not in EVENTS:
+                return
+            logger.info(json.dumps(event))
+            self.wfile.write(b"OK\n")
+        except (ValueError, TypeError, OSError):
+            return
+
+class Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+with Server(("10.60.214.10", 5514), Receiver) as server:
+    server.serve_forever()

@@ -1,0 +1,94 @@
+#!/usr/bin/python3
+import datetime
+import json
+import os
+import socket
+import sys
+import uuid
+from pathlib import Path
+
+LOG = Path("/var/log/lab14/decoy.jsonl")
+SOC = ("10.60.214.10", 5514)
+SESSION = uuid.uuid4().hex[:12]
+CLIENT = os.environ.get("SSH_CONNECTION", "").split()
+SRC = CLIENT[0] if CLIENT else "unknown"
+
+def emit(eventid, command=None):
+    event = {
+        "timestamp": datetime.datetime.now(
+            datetime.timezone.utc
+        ).isoformat(),
+        "eventid": eventid,
+        "src_ip": SRC,
+        "session": SESSION,
+        "username": "decoy"
+    }
+    if command is not None:
+        event["input"] = command
+
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+
+    if LOG.exists() and LOG.stat().st_size > 2 * 1024 * 1024:
+        backup = LOG.with_suffix(".jsonl.1")
+        LOG.replace(backup)
+
+    with LOG.open("a") as f:
+        f.write(json.dumps(event) + "\n")
+
+    try:
+        with socket.create_connection(SOC, timeout=1.5) as sock:
+            sock.settimeout(1.5)
+            sock.sendall((json.dumps(event) + "\n").encode())
+            sock.recv(16)
+    except OSError:
+        pass
+
+def execute(command):
+    command = command.strip()
+    if not command:
+        return True
+
+    if command in ("exit", "logout", "quit"):
+        return False
+
+    emit("lab14.command.input", command)
+
+    outputs = {
+        "whoami": "root",
+        "pwd": "/root",
+        "ls": "backup  logs  notes.txt",
+        "ls -la": "drwx------ root root .\n"
+                  "-rw-r--r-- root root notes.txt",
+        "id": "uid=0(root) gid=0(root) groups=0(root)",
+        "hostname": "svr04",
+        "uname -a": "Linux svr04 (simulated honeypot)",
+        "help": "Supported: whoami, pwd, ls, ls -la, "
+                "id, hostname, uname -a, exit"
+    }
+
+    print(outputs.get(command, command + ": command not found"),
+          flush=True)
+    return True
+
+def main():
+    emit("lab14.session.connect")
+    print("Debian GNU/Linux - LAB14 simulated SSH environment")
+    print("Authorized training environment.\n", flush=True)
+
+    try:
+        original = os.environ.get("SSH_ORIGINAL_COMMAND")
+        if original:
+            execute(original)
+        else:
+            while True:
+                try:
+                    command = input("root@svr04:~# ")
+                except EOFError:
+                    break
+                if not execute(command):
+                    break
+    finally:
+        emit("lab14.session.close")
+
+if __name__ == "__main__":
+    main()

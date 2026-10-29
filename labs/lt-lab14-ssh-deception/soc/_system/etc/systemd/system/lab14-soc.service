@@ -1,0 +1,12 @@
+[Unit]
+Description=LAB14 Lightweight SOC Receiver
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/lab14-soc-receiver
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

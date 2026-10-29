@@ -1,0 +1,9 @@
+LAB14 SSH Deception & Lightweight SOC
+
+Target: 172.31.64.40
+SSH Port: 2222
+Training user: decoy
+Training password: Lab14-Practice-Only!
+
+This is a simulated shell, not a real root account.
+Never use a real password in this lab.

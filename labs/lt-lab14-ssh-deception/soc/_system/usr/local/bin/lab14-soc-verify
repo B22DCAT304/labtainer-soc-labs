@@ -1,0 +1,72 @@
+#!/usr/bin/python3
+
+import json
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+source = Path("/var/log/lab14-soc/events.jsonl")
+report = Path("/var/log/lab14-soc/verification.txt")
+
+target = "172.31.64.50"
+required = {"whoami", "pwd", "ls"}
+
+# Avoid retaining an outdated PASS report.
+if report.exists():
+    report.unlink()
+
+sessions = defaultdict(list)
+
+if source.exists():
+    for line in source.open(errors="replace"):
+        try:
+            event = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+
+        if not isinstance(event, dict):
+            continue
+
+        if event.get("src_ip") != target:
+            continue
+
+        session = event.get("session")
+
+        if session:
+            sessions[session].append(event)
+
+for session, events in sessions.items():
+    types = {e.get("eventid") for e in events}
+
+    commands = {
+        e.get("input")
+        for e in events
+        if e.get("eventid") == "lab14.command.input"
+    }
+
+    complete = (
+        "lab14.session.connect" in types
+        and "lab14.session.close" in types
+        and required.issubset(commands)
+    )
+
+    if not complete:
+        continue
+
+    result = (
+        "LAB14_CORRELATION_PASS "
+        "src_ip=172.31.64.50 "
+        "commands=whoami,pwd,ls "
+        "session_close=yes "
+        "simulated_shell=yes "
+        "session={}\n"
+    ).format(session)
+
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(result)
+
+    print(result.strip())
+    sys.exit(0)
+
+print("LAB14_CORRELATION_FAIL")
+sys.exit(1)

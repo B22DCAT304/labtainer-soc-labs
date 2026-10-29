@@ -1,0 +1,23 @@
+#!/usr/bin/python3
+import socket
+from pathlib import Path
+
+target = ("172.31.64.40", 2222)
+output = Path("/var/log/lab14/post-block.out")
+output.parent.mkdir(parents=True, exist_ok=True)
+
+s = socket.socket()
+s.settimeout(4)
+
+try:
+    s.connect(target)
+    result = "LAB14_POST_BLOCK_FAIL: SSH still reachable"
+except socket.timeout:
+    result = "LAB14_POST_BLOCK_PASS: attacker connection dropped"
+except OSError as e:
+    result = "LAB14_POST_BLOCK_FAIL: {}".format(e)
+finally:
+    s.close()
+
+output.write_text(result + "\n")
+print(result)

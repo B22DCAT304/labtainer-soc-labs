@@ -1,0 +1,32 @@
+#!/usr/bin/python3
+import json
+from collections import Counter
+from pathlib import Path
+
+p = Path("/var/log/lab14-soc/events.jsonl")
+counts = Counter()
+sources = Counter()
+
+if p.exists():
+    for line in p.open(errors="replace"):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        counts[e.get("eventid")] += 1
+        sources[e.get("src_ip")] += 1
+
+for name in (
+    "lab14.session.connect",
+    "lab14.command.input",
+    "lab14.session.close"
+):
+    print("{}: {}".format(name, counts[name]))
+
+print("ATTACKER_IP_172.31.64.50:",
+      "PASS" if sources["172.31.64.50"] else "FAIL")
+
+if counts["lab14.command.input"] > 0:
+    print("LAB14_SOC_TELEMETRY_PASS")
+else:
+    print("LAB14_SOC_TELEMETRY_NOT_YET_VERIFIED")

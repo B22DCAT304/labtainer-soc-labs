@@ -1,0 +1,119 @@
+#!/usr/bin/python3
+import hashlib
+import json
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+BASE = Path("/var/log/lab14-soc")
+SOURCE = BASE / "events.jsonl"
+ALERTS = BASE / "alerts.jsonl"
+TARGET = "172.31.64.50"
+
+sessions = defaultdict(list)
+
+if not SOURCE.exists():
+    print("LAB14_DETECTION_FAIL: no telemetry")
+    sys.exit(1)
+
+for line in SOURCE.open(errors="replace"):
+    try:
+        event = json.loads(line)
+    except ValueError:
+        continue
+
+    if not isinstance(event, dict):
+        continue
+
+    if event.get("src_ip") != TARGET:
+        continue
+
+    sid = event.get("session")
+    if sid:
+        sessions[sid].append(event)
+
+for sid, events in sessions.items():
+    commands = {
+        e.get("input")
+        for e in events
+        if e.get("eventid") == "lab14.command.input"
+    }
+
+    types = {e.get("eventid") for e in events}
+
+    suspicious = {"id", "cat /etc/shadow"}
+
+    if not suspicious.issubset(commands):
+        continue
+
+    if not {
+        "lab14.session.connect",
+        "lab14.session.close"
+    }.issubset(types):
+        continue
+
+    alert = {
+        "eventid": "lab14.alert.high",
+        "severity": "high",
+        "category": "credential_access_probe",
+        "src_ip": TARGET,
+        "session": sid,
+        "matched_commands": sorted(suspicious),
+        "server_compromise_proven": False,
+        "containment": "requires_manual_approval"
+    }
+
+    existing = set()
+
+    if ALERTS.exists():
+        for line in ALERTS.open(errors="replace"):
+            try:
+                a = json.loads(line)
+                existing.add(a.get("session"))
+            except ValueError:
+                pass
+
+    if sid not in existing:
+        with ALERTS.open("a") as f:
+            f.write(json.dumps(alert, sort_keys=True) + "\n")
+
+    evidence_dir = BASE / "evidence" / sid
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+
+    evidence = evidence_dir / "session.jsonl"
+
+    data = "".join(
+        json.dumps(e, sort_keys=True) + "\n"
+        for e in events
+    )
+
+    evidence.write_text(data)
+
+    digest = hashlib.sha256(
+        evidence.read_bytes()
+    ).hexdigest()
+
+    manifest = evidence_dir / "manifest.txt"
+
+    manifest.write_text(
+        "LAB14_EVIDENCE_PRESERVED\n"
+        "src_ip={}\n"
+        "session={}\n"
+        "events={}\n"
+        "file=session.jsonl\n"
+        "sha256={}\n".format(
+            TARGET, sid, len(events), digest
+        )
+    )
+
+    print("LAB14_HIGH_ALERT_PASS")
+    print("SOURCE_IP:", TARGET)
+    print("SESSION:", sid)
+    print("SEVERITY: high")
+    print("CATEGORY: credential_access_probe")
+    print("EVIDENCE:", evidence)
+    print("SHA256:", digest)
+    sys.exit(0)
+
+print("LAB14_DETECTION_FAIL: no matching suspicious session")
+sys.exit(1)

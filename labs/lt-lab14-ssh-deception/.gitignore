@@ -1,0 +1,6 @@
+*.tar.gz
+sys_tar/
+home_tar/
+__pycache__/
+*.pyc
+*.log

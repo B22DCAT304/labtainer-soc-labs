@@ -1,0 +1,63 @@
+#!/bin/bash
+set -euo pipefail
+
+CHAIN="LAB14_SSH"
+ATTACKER="172.31.64.50"
+DECOY="172.31.64.40"
+LOG="/var/log/lab14/policy.log"
+
+case "${1:-}" in
+    init)
+        iptables -N "$CHAIN" 2>/dev/null || true
+        iptables -F "$CHAIN"
+
+        iptables -A "$CHAIN" \
+            -m conntrack --ctstate ESTABLISHED,RELATED \
+            -j ACCEPT
+
+        iptables -A "$CHAIN" \
+            -s "$ATTACKER" -d "$DECOY" \
+            -p tcp --dport 2222 -j ACCEPT
+
+        iptables -A "$CHAIN" -j DROP
+
+        iptables -C INPUT \
+            -p tcp --dport 2222 \
+            -j "$CHAIN" 2>/dev/null ||
+        iptables -I INPUT 1 \
+            -p tcp --dport 2222 \
+            -j "$CHAIN"
+
+        echo "LAB14_POLICY default_deny=yes scope=ssh port=2222 least_privilege=yes" >> "$LOG"
+
+        echo "LAB14_DEFAULT_DENY_PASS"
+        ;;
+
+    contain)
+        if [ "${2:-}" != "APPROVE" ]; then
+            echo "Manual approval required"
+            echo "Usage: lab14-policy contain APPROVE"
+            exit 1
+        fi
+
+        iptables -C "$CHAIN" \
+            -s "$ATTACKER" \
+            -j DROP 2>/dev/null ||
+        iptables -I "$CHAIN" 1 \
+            -s "$ATTACKER" \
+            -j DROP
+
+        echo "LAB14_BLOCK source_ip=$ATTACKER action=drop approval=manual" >> "$LOG"
+
+        echo "LAB14_CONTAINMENT_PASS"
+        ;;
+
+    status)
+        iptables -nvL "$CHAIN"
+        ;;
+
+    *)
+        echo "Usage: lab14-policy init|contain APPROVE|status"
+        exit 2
+        ;;
+esac

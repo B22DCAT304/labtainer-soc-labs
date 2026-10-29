@@ -1,0 +1,73 @@
+#!/usr/bin/python3
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+base = Path("/var/log/lab14-soc")
+mode = sys.argv[1] if len(sys.argv) == 2 else ""
+if mode not in ("evidence", "report"):
+    sys.exit("Usage: lab14-review evidence|report")
+
+result = base / ("integrity-check.txt" if mode == "evidence"
+                 else "report-check.txt")
+if result.exists():
+    result.unlink()
+
+try:
+    alerts = [json.loads(x) for x in
+              (base / "alerts.jsonl").read_text().splitlines() if x.strip()]
+    alert = next(a for a in reversed(alerts)
+                 if a.get("eventid") == "lab14.alert.high"
+                 and a.get("src_ip") == "172.31.64.50")
+
+    sid = alert["session"]
+    folder = base / "evidence" / sid
+    evidence = folder / "session.jsonl"
+    manifest = dict(x.split("=", 1) for x in
+                    (folder / "manifest.txt").read_text().splitlines()
+                    if "=" in x)
+
+    digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
+    events = [json.loads(x) for x in
+              evidence.read_text().splitlines() if x.strip()]
+    types = {e.get("eventid") for e in events}
+    commands = {e.get("input") for e in events
+                if e.get("eventid") == "lab14.command.input"}
+
+    assert digest == manifest["sha256"]
+    assert manifest["session"] == sid
+    assert manifest["src_ip"] == "172.31.64.50"
+    assert int(manifest["events"]) == len(events)
+    assert all(e.get("session") == sid and
+               e.get("src_ip") == "172.31.64.50" for e in events)
+    assert {"lab14.session.connect",
+            "lab14.session.close"}.issubset(types)
+    assert {"id", "cat /etc/shadow"}.issubset(commands)
+
+    if mode == "evidence":
+        result.write_text("LAB14_EVIDENCE_INTEGRITY_PASS\n")
+        print("LAB14_EVIDENCE_INTEGRITY_PASS")
+        print("SESSION:", sid)
+        print("SHA256:", digest)
+    else:
+        report = dict(x.split("=", 1) for x in
+                      (base / "incident-report.txt").read_text().splitlines()
+                      if "=" in x)
+
+        required = {
+            "src_ip": "172.31.64.50",
+            "session": sid,
+            "severity": "high",
+            "indicators": "id,cat /etc/shadow",
+            "compromise": "not_proven",
+            "response": "blocked",
+            "evidence_sha256": digest
+        }
+        assert all(report.get(k) == v for k, v in required.items())
+        result.write_text("LAB14_INCIDENT_REPORT_PASS\n")
+        print("LAB14_INCIDENT_REPORT_PASS")
+
+except (OSError, ValueError, KeyError, AssertionError, StopIteration) as e:
+    print("LAB14_REVIEW_FAIL:", str(e))
+    sys.exit(1)
